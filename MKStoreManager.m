@@ -50,7 +50,7 @@
 
 @interface MKStoreManager () //private methods and properties
 
-@property (nonatomic, copy) void (^onTransactionCancelled)();
+@property (nonatomic, copy) void (^onTransactionCancelled)(NSError *error, SKPaymentTransaction *transaction);
 @property (nonatomic, copy) void (^onTransactionCompleted)(NSString *productId, NSData* receiptData, NSArray* downloads);
 
 @property (nonatomic, copy) void (^onRestoreFailed)(NSError* error);
@@ -235,7 +235,17 @@ static MKStoreManager* _sharedStoreManager;
   NSMutableArray *productsArray = [NSMutableArray array];
   NSArray *consumables = [[[MKStoreManager storeKitItems] objectForKey:@"Consumables"] allKeys];
   NSArray *nonConsumables = [[MKStoreManager storeKitItems] objectForKey:@"Non-Consumables"];
-  NSArray *subscriptions = [[[MKStoreManager storeKitItems] objectForKey:@"Subscriptions"] allKeys];
+  
+  
+  NSArray *subscriptions;
+  if ([[NSUserDefaults standardUserDefaults] objectForKey:@"Subscriptions"]) {
+    subscriptions = [[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"Subscriptions"] allKeys];
+  }
+  else {
+    subscriptions = [[[MKStoreManager storeKitItems] objectForKey:@"Subscriptions"] allKeys];
+  }
+  
+//  NSArray *subscriptions = [[[MKStoreManager storeKitItems] objectForKey:@"Subscriptions"] allKeys];
   
   [productsArray addObjectsFromArray:consumables];
   [productsArray addObjectsFromArray:nonConsumables];
@@ -250,27 +260,23 @@ static MKStoreManager* _sharedStoreManager;
   
   NSMutableArray *productsArray = [NSMutableArray array];
   NSArray *consumables = [[[self storeKitItems] objectForKey:@"Consumables"] allKeys];
-  NSArray *consumableNames = [self allConsumableNames];
   NSArray *nonConsumables = [[self storeKitItems] objectForKey:@"Non-Consumables"];
-  NSArray *subscriptions = [[[self storeKitItems] objectForKey:@"Subscriptions"] allKeys];
+  
+  NSArray *subscriptions;
+  if ([[NSUserDefaults standardUserDefaults] objectForKey:@"Subscriptions"]) {
+    subscriptions = [[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"Subscriptions"] allKeys];
+  }
+  else {
+    subscriptions = [[[MKStoreManager storeKitItems] objectForKey:@"Subscriptions"] allKeys];
+  }
+  
+//  NSArray *subscriptions = [[[self storeKitItems] objectForKey:@"Subscriptions"] allKeys];
   
   [productsArray addObjectsFromArray:consumables];
-  [productsArray addObjectsFromArray:consumableNames];
   [productsArray addObjectsFromArray:nonConsumables];
   [productsArray addObjectsFromArray:subscriptions];
   
   return productsArray;
-}
-
-+ (NSArray *)allConsumableNames {
-    NSMutableSet *consumableNames = [[NSMutableSet alloc] initWithCapacity:0];
-    NSDictionary *consumables = [[self storeKitItems] objectForKey:@"Consumables"];
-    for (NSDictionary *consumable in [consumables allValues]) {
-        NSString *name = [consumable objectForKey:@"Name"];
-        [consumableNames addObject:name];
-    }
-    
-    return [consumableNames allObjects];
 }
 
 - (BOOL) removeAllKeychainData {
@@ -432,7 +438,7 @@ static MKStoreManager* _sharedStoreManager;
 
 - (void) buyFeature:(NSString*) featureId
          onComplete:(void (^)(NSString*, NSData*, NSArray*)) completionBlock
-        onCancelled:(void (^)(void)) cancelBlock
+        onCancelled:(void (^)(NSError*, SKPaymentTransaction*)) cancelBlock
 {
   self.onTransactionCompleted = completionBlock;
   self.onTransactionCancelled = cancelBlock;
@@ -468,7 +474,12 @@ static MKStoreManager* _sharedStoreManager;
     NSArray *allIds = [self.purchasableObjects valueForKey:@"productIdentifier"];
     int index = [allIds indexOfObject:productId];
     
-    if(index == NSNotFound) return;
+    if(index == NSNotFound) {
+      if (self.onTransactionCancelled) {
+        self.onTransactionCancelled([NSError errorWithDomain:@"HubErrorDomain" code:109 userInfo:nil], nil);
+        return;
+      }
+    }
     
     SKProduct *thisProduct = [self.purchasableObjects objectAtIndex:index];
 		SKPayment *payment = [SKPayment paymentWithProduct:thisProduct];
@@ -518,32 +529,32 @@ static MKStoreManager* _sharedStoreManager;
   for(NSString *productId in [subscriptions allKeys])
   {
     MKSKSubscriptionProduct *product = [[MKSKSubscriptionProduct alloc] initWithProductId:productId subscriptionDays:[[subscriptions objectForKey:productId] intValue]];
-    product.receipt = [MKStoreManager dataForKey:productId]; // cached receipt
-    
-    if(product.receipt)
-    {
-      [product verifyReceiptOnComplete:^(NSNumber* isActive)
-       {
-         if([isActive boolValue] == NO)
-         {
-           [[NSNotificationCenter defaultCenter] postNotificationName:kSubscriptionsInvalidNotification
-                                                               object:product.productId];
-           
-           NSLog(@"Subscription: %@ is inactive", product.productId);
-           product.receipt = nil;
-           [self.subscriptionProducts setObject:product forKey:productId];
-           [MKStoreManager setObject:nil forKey:product.productId];
-         }
-         else
-         {
-           NSLog(@"Subscription: %@ is active", product.productId);
-         }
-       }
-                               onError:^(NSError* error)
-       {
-         NSLog(@"Unable to check for subscription validity right now");
-       }];
-    }
+//    product.receipt = [MKStoreManager dataForKey:productId]; // cached receipt
+//    
+//    if(product.receipt)
+//    {
+//      [product verifyReceiptOnComplete:^(NSNumber* isActive)
+//       {
+//         if([isActive boolValue] == NO)
+//         {
+//           [[NSNotificationCenter defaultCenter] postNotificationName:kSubscriptionsInvalidNotification
+//                                                               object:product.productId];
+//           
+//           NSLog(@"Subscription: %@ is inactive", product.productId);
+//           product.receipt = nil;
+//           [self.subscriptionProducts setObject:product forKey:productId];
+//           [MKStoreManager setObject:nil forKey:product.productId];
+//         }
+//         else
+//         {
+//           NSLog(@"Subscription: %@ is active", product.productId);
+//         }
+//       }
+//                               onError:^(NSError* error)
+//       {
+//         NSLog(@"Unable to check for subscription validity right now");
+//       }];
+//    }
     
     [self.subscriptionProducts setObject:product forKey:productId];
   }
@@ -612,19 +623,19 @@ static MKStoreManager* _sharedStoreManager;
     // so this can be safely ignored.
     
     subscriptionProduct.receipt = receiptData;
-    [subscriptionProduct verifyReceiptOnComplete:^(NSNumber* isActive)
-     {
+//    [subscriptionProduct verifyReceiptOnComplete:^(NSNumber* isActive)
+//     {
        [[NSNotificationCenter defaultCenter] postNotificationName:kSubscriptionsPurchasedNotification
                                                            object:productIdentifier];
        
        [MKStoreManager setObject:receiptData forKey:productIdentifier];
        if(self.onTransactionCompleted)
          self.onTransactionCompleted(productIdentifier, receiptData, hostedContent);
-     }
-                                         onError:^(NSError* error)
-     {
-       NSLog(@"%@", [error description]);
-     }];
+//     }
+//                                         onError:^(NSError* error)
+//     {
+//       NSLog(@"%@", [error description]);
+//     }];
   }
   else
   {
@@ -636,7 +647,7 @@ static MKStoreManager* _sharedStoreManager;
       if(!receiptData) {
         if(self.onTransactionCancelled)
         {
-          self.onTransactionCancelled(productIdentifier);
+          self.onTransactionCancelled([NSError errorWithDomain:@"MKSTOREERROR" code:0 userInfo:@{@"productId":productIdentifier}], nil);
         }
         else
         {
@@ -662,7 +673,7 @@ static MKStoreManager* _sharedStoreManager;
        {
          if(self.onTransactionCancelled)
          {
-           self.onTransactionCancelled(productIdentifier);
+           self.onTransactionCancelled(error, nil);
          }
          else
          {
@@ -720,7 +731,7 @@ static MKStoreManager* _sharedStoreManager;
       case SKPaymentTransactionStateFailed:
 				
         [self failedTransaction:transaction];
-				
+		
         break;
 				
       case SKPaymentTransactionStateRestored:
@@ -751,11 +762,10 @@ static MKStoreManager* _sharedStoreManager;
   NSLog(@"Failed transaction: %@", [transaction description]);
   NSLog(@"error: %@", transaction.error);
 #endif
-	
-  [[SKPaymentQueue defaultQueue] finishTransaction: transaction];
+	if(self.onTransactionCancelled)
+    self.onTransactionCancelled(transaction.error, transaction);
   
-  if(self.onTransactionCancelled)
-    self.onTransactionCancelled();
+  [[SKPaymentQueue defaultQueue] finishTransaction: transaction];
 }
 
 - (void) completeTransaction: (SKPaymentTransaction *)transaction
